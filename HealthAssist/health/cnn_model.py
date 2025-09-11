@@ -5,12 +5,10 @@ from tensorflow.keras.preprocessing import image
 
 # Base directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Path to model
 MODEL_PATH = os.path.join(BASE_DIR, "skin_disease_model.h5")
 
-# Load the trained model
-model = load_model(MODEL_PATH)
+# Global model (lazy init)
+model = None
 
 # Class names (must match the trained model output)
 CLASS_NAMES = [
@@ -21,7 +19,6 @@ CLASS_NAMES = [
     "Melanoma", "Benign Nevus", "Seborrheic Keratosis", "Dermatofibroma",
     "Cherry Angioma", "Vascular Lesion"
 ]
-
 # Your SKIN_INFO dictionary (paste all your entries here)
 SKIN_INFO = {
   "Acne": {
@@ -164,6 +161,13 @@ SKIN_INFO = {
   }
 }
 
+def get_model():
+    """Load model only once (lazy loading)."""
+    global model
+    if model is None:
+        model = load_model(MODEL_PATH)
+    return model
+
 
 def predict_skin_disease(img_path):
     # Load and preprocess image
@@ -172,7 +176,8 @@ def predict_skin_disease(img_path):
     img_array = np.expand_dims(img_array, axis=0)
     img_array = img_array / 255.0
 
-    # Make prediction
+    # Get model and make prediction
+    model = get_model()
     preds = model.predict(img_array)
     idx = np.argmax(preds[0])
     class_name = CLASS_NAMES[idx]
@@ -180,16 +185,11 @@ def predict_skin_disease(img_path):
 
     # Get detailed info
     info = SKIN_INFO.get(class_name, {})
-    description = info.get("description", "")
-    medical_treatment = info.get("medical_treatment", "")
-    home_remedies = info.get("home_remedies", "")
-    diet = info.get("diet", "")
-
     return {
         "class_name": class_name,
         "confidence": confidence,
-        "description": description,
-        "medical_treatment": medical_treatment,
-        "home_remedies": home_remedies,
-        "diet": diet
+        "description": info.get("description", ""),
+        "medical_treatment": info.get("medical_treatment", ""),
+        "home_remedies": info.get("home_remedies", ""),
+        "diet": info.get("diet", "")
     }
