@@ -45,6 +45,7 @@ REST_FRAMEWORK = {
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
+    "https://healthassist1.vercel.app"
 ]
 CORS_ALLOW_CREDENTIALS = True
 
@@ -130,4 +131,5 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY")
 
 MEDIA_URL = '/media/'
+
 MEDIA_ROOT = BASE_DIR / 'media'
