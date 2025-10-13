@@ -7,10 +7,8 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 import base64
 from .models import UserProfile, HealthRecord
-from .serializers import UserProfileSerializer, HealthRecordSerializer
+from .serializers import UserProfileSerializer, HealthRecordSerializer, SkinDiseaseSerializer
 import base64
-from .serializers import SkinDiseaseSerializer
-from .cnn_model import predict_skin_disease
 import json
 import numpy as np
 from django.conf import settings
@@ -309,5 +307,6 @@ class SkinDiseasePredictionView(APIView):
             default_storage.delete(temp_path)
 
         return Response(result)
+
 
 
