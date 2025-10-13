@@ -11,7 +11,21 @@ from .serializers import UserProfileSerializer, HealthRecordSerializer
 import base64
 from .serializers import SkinDiseaseSerializer
 from .cnn_model import predict_skin_disease
+import json
+import numpy as np
+from django.conf import settings
+from django.core.files.storage import default_storage
+from rest_framework import serializers
+from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser
+from rest_framework.response import Response
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing import image
+from .models import HealthRecord
 
+# -------------------- Serializer --------------------
+class SkinDiseaseSerializer(serializers.Serializer):
+    image = serializers.ImageField()
 
 
 
@@ -190,29 +204,110 @@ class HealthRecordView(APIView):
             },
             status=status.HTTP_201_CREATED
         )
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from django.core.files.storage import default_storage
-from .cnn_model import predict_skin_disease
 
+
+
+
+# helath skin SkinDiseaseSerializer perdcion
+
+MODEL_PATH = os.path.join(settings.BASE_DIR, "health", "skin_disease_model.h5")
+JSON_PATH = os.path.join(settings.BASE_DIR, "health", "class_indices.json")
+
+# Load model
+try:
+    model = load_model(MODEL_PATH)
+    print("✅ Model loaded successfully.")
+except Exception as e:
+    print(f"❌ Error loading model: {e}")
+    model = None
+
+# Load JSON file
+try:
+    with open(JSON_PATH, "r") as f:
+        class_data = json.load(f)
+except Exception as e:
+    print(f"⚠️ Error loading class_indices.json: {e}")
+    class_data = {}
+
+# Map indices to class names
+if class_data:
+    first_val = list(class_data.values())[0]
+    if isinstance(first_val, int):
+        # Simple format: {"Acne": 0, "Eczema": 1}
+        classes = {v: k for k, v in class_data.items()}
+    else:
+        # Extended format with full info
+        classes = {v["index"]: k for k, v in class_data.items()}
+else:
+    classes = {}
+
+# -------------------- Prediction View --------------------
 class SkinDiseasePredictionView(APIView):
-    """
-    Predict skin disease from an uploaded image and return detailed info.
-    """
-    def post(self, request, format=None):
-        if 'image' not in request.FILES:
-            return Response({"error": "No image uploaded"}, status=400)
+    parser_classes = [MultiPartParser]
 
-        # Save uploaded image temporarily
-        image_file = request.FILES['image']
-        path = default_storage.save(f"temp/{image_file.name}", image_file)
-        full_path = default_storage.path(path)
+    def post(self, request, format=None):
+        serializer = SkinDiseaseSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        image_file = serializer.validated_data["image"]
+        temp_path = default_storage.save(f"temp/{image_file.name}", image_file)
+        full_path = default_storage.path(temp_path)
 
         try:
-            # Get prediction
-            result = predict_skin_disease(full_path)
+            if model is None:
+                raise ValueError("Model not loaded. Check the model path.")
+
+            # Preprocess the image
+            img = image.load_img(full_path, target_size=(224, 224))
+            img_array = image.img_to_array(img) / 255.0
+            img_array = np.expand_dims(img_array, axis=0)
+
+            # Predict
+            preds = model.predict(img_array)
+            predicted_index = int(np.argmax(preds[0]))
+            confidence = float(np.max(preds[0]))
+
+            # Get predicted label
+            predicted_label = classes.get(predicted_index, "Unknown")
+
+            # Get disease info from JSON
+            disease_info = class_data.get(predicted_label, {})
+            if isinstance(disease_info, int):
+                # Simple index only, no extra info
+                disease_info = {"index": disease_info}
+            else:
+                # Ensure all expected keys exist
+                for key in ["description", "medical_treatment", "home_remedies", "diet", "specialist_doctors"]:
+                    disease_info.setdefault(key, "" if key != "specialist_doctors" else [])
+
+            # Save record to DB if user is authenticated
+            user = request.user if request.user.is_authenticated else None
+            HealthRecord.objects.create(
+                user=user,
+                message="Skin disease prediction",
+                image=image_file,
+                bot_response=predicted_label,
+            )
+
+            # Build API response
+            result = {
+                "class_name": predicted_label,
+                "confidence": round(confidence * 100, 2),
+                "description": disease_info.get("description"),
+                "medical_treatment": disease_info.get("medical_treatment"),
+                "home_remedies": disease_info.get("home_remedies"),
+                "diet": disease_info.get("diet"),
+                "specialist_doctors": disease_info.get("specialist_doctors"),
+            }
+
+        except Exception as e:
+            result = {"error": str(e)}
+
         finally:
-            # Delete temporary file
-            default_storage.delete(path)
+            # Delete temporary uploaded file
+            default_storage.delete(temp_path)
 
         return Response(result)
+
+
